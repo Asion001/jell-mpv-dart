@@ -1,0 +1,60 @@
+# Jellyfin MPV Shim Configuration Example
+# Copy this file to config.yaml and fill in your credentials
+
+# Base Jellyfin server URL (required)
+server: https://jellyfin.example.com
+
+# Jellyfin user ID that owns the session (required)
+# Find in: User Settings → Profile → User ID
+userId: YOUR_USER_ID_HERE
+
+# Authentication: Choose ONE method below
+
+# Method 1: Username/Password (recommended if API Keys UI is unavailable)
+# The client will authenticate using /Users/AuthenticateByName and obtain a session token
+username: YOUR_USERNAME_HERE
+password: YOUR_PASSWORD_HERE
+
+# Method 2: API token (if you have User Settings → API Keys)
+# IMPORTANT: Must be a user-specific API key created in User Settings → API Keys
+# DO NOT use a system-wide or admin API key - it will create an anonymous session!
+# If using username/password above, comment out or remove this line:
+# accessToken: YOUR_ACCESS_TOKEN_HERE
+
+# Unique device identifier (required)
+# This identifies your mpv player instance to Jellyfin
+deviceId: my_mpv_player
+
+# Human-readable device name (required)
+# This name appears in Jellyfin's device list
+deviceName: My MPV Player
+
+# Client identification (optional)
+clientName: jell_dart_mpv
+clientVersion: 0.1.0
+
+# mpv configuration (optional)
+# Path to mpv executable (default: mpv)
+mpvExecutable: mpv
+
+# Additional arguments passed to mpv (optional)
+mpvArgs:
+  - --profile=gpu-hq
+  - --hwdec=auto
+  - --cache=yes
+  - --demuxer-max-bytes=150M
+
+# WebSocket keep-alive interval (optional)
+# Prevents connection timeouts. Accepts: 15s, 1m, 60, etc.
+# Default: 15s
+keepAliveInterval: 15s
+
+# Playback progress reporting interval (optional)
+# How often to sync playback position with Jellyfin
+# Default: 30s
+playbackProgressInterval: 30s
+
+# Reconnect backoff for startup (optional)
+# Delay between WebSocket connection retry attempts
+# Default: 5s
+startupReconnectBackoff: 5s

@@ -1,0 +1,8 @@
+# https://dart.dev/guides/libraries/private-files
+# Created by `dart pub`
+.dart_tool/
+
+# Created by user, contains sensitive information
+# Do not track in version control
+config.yaml
+openapi

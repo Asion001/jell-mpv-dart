@@ -1,0 +1,26 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run jell_dart_mpv",
+            "type": "dart",
+            "request": "launch",
+            "program": "bin/jell_dart_mpv.dart",
+            "args": [
+                "--config",
+                "config.yaml"
+            ]
+        },
+        {
+            "name": "Run jell_dart_mpv (verbose)",
+            "type": "dart",
+            "request": "launch",
+            "program": "bin/jell_dart_mpv.dart",
+            "args": [
+                "--config",
+                "config.yaml",
+                "--verbose"
+            ]
+        },
+    ]
+}
