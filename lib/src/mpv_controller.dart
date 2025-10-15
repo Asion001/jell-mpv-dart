@@ -7,6 +7,14 @@ import 'package:path/path.dart' as p;
 
 import 'config.dart';
 
+/// Represents a property change event from mpv.
+class MpvPropertyChange {
+  MpvPropertyChange(this.property, this.value);
+
+  final String property;
+  final dynamic value;
+}
+
 /// Manages an mpv process through its JSON IPC interface.
 class MpvController {
   MpvController(this.config);
@@ -14,6 +22,8 @@ class MpvController {
   final JellyfinConfig config;
   final _log = Logger('MpvController');
   final _exitController = StreamController<int>.broadcast();
+  final _propertyChangeController =
+      StreamController<MpvPropertyChange>.broadcast();
   final Map<int, Completer<dynamic>> _pendingRequests = {};
 
   Process? _process;
@@ -23,6 +33,8 @@ class MpvController {
   int _nextRequestId = 1;
 
   Stream<int> get onExit => _exitController.stream;
+  Stream<MpvPropertyChange> get onPropertyChange =>
+      _propertyChangeController.stream;
 
   bool get isRunning => _process != null;
 
@@ -40,29 +52,46 @@ class MpvController {
       if (title != null) '--title=$title',
       if (startPosition != null)
         '--start=${startPosition.inMilliseconds / 1000}',
-      if (audioStreamIndex != null) '--aid=${audioStreamIndex + 1}',
-      if (subtitleStreamIndex != null) '--sid=${subtitleStreamIndex + 1}',
+      // Jellyfin sends absolute container stream indices
+      // Pass them directly to mpv
+      if (audioStreamIndex != null) '--aid=$audioStreamIndex',
+      if (subtitleStreamIndex != null) '--sid=$subtitleStreamIndex',
       ...config.mpvArgs,
       mediaUrl.toString(),
     ];
     _log.info('Starting mpv with ${args.join(' ')}');
-    _process = await Process.start(config.mpvExecutable, args);
-    _process!.stdout
+    final process = await Process.start(config.mpvExecutable, args);
+    _process = process;
+
+    process.stdout
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen((line) => _log.fine('mpv stdout: $line'));
-    _process!.stderr
+    process.stderr
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen((line) => _log.warning('mpv stderr: $line'));
 
-    _process!.exitCode.then((code) {
-      _log.info('mpv exited with code $code');
+    // Capture the process reference to avoid race condition with stop()
+    process.exitCode.then((code) {
+      _log.info('mpv process exited with code $code');
       _exitController.add(code);
-      _cleanup();
+      // Only cleanup if this is still the active process
+      if (_process == process) {
+        _log.fine('Cleaning up after mpv exit');
+        _cleanup();
+      } else {
+        _log.fine('Skipping cleanup - different process is now active');
+      }
     });
 
     await _attachIpc(ipcPath);
+
+    // Observe properties for real-time change notifications
+    await _observeProperty('pause');
+    await _observeProperty('time-pos');
+    await _observeProperty('volume');
+    await _observeProperty('mute');
   }
 
   Future<void> stop() async {
@@ -90,6 +119,56 @@ class MpvController {
     return null;
   }
 
+  Future<bool> queryPaused() async {
+    final response = await _sendCommand(['get_property', 'pause']);
+    if (response is bool) {
+      return response;
+    }
+    return false;
+  }
+
+  Future<bool> queryMuted() async {
+    final response = await _sendCommand(['get_property', 'mute']);
+    if (response is bool) {
+      return response;
+    }
+    return false;
+  }
+
+  Future<int?> queryVolume() async {
+    final response = await _sendCommand(['get_property', 'volume']);
+    if (response is num) {
+      return response.round();
+    }
+    return null;
+  }
+
+  Future<int?> queryAudioTrack() async {
+    final response = await _sendCommand(['get_property', 'aid']);
+    if (response == 'no' || response == false) {
+      return null; // No audio track selected
+    }
+    if (response is num) {
+      // mpv returns the absolute stream ID from the container
+      // Pass through directly to Jellyfin
+      return response.round();
+    }
+    return null;
+  }
+
+  Future<int?> querySubtitleTrack() async {
+    final response = await _sendCommand(['get_property', 'sid']);
+    if (response == 'no' || response == false) {
+      return null; // No subtitle track selected
+    }
+    if (response is num) {
+      // mpv returns the absolute stream ID from the container
+      // Pass through directly to Jellyfin
+      return response.round();
+    }
+    return null;
+  }
+
   Future<void> setPause(bool value) async {
     await _sendCommand(['set_property', 'pause', value]);
   }
@@ -100,6 +179,68 @@ class MpvController {
       'time-pos',
       position.inMilliseconds / 1000,
     ]);
+  }
+
+  Future<void> setVolume(int value) async {
+    final clampedValue = value.clamp(0, 100);
+    _log.info('MpvController.setVolume: Setting volume to $clampedValue');
+    await _sendCommand(['set_property', 'volume', clampedValue]);
+    _log.info('MpvController.setVolume: Command sent');
+  }
+
+  Future<void> setMute(bool value) async {
+    await _sendCommand(['set_property', 'mute', value]);
+  }
+
+  Future<void> adjustVolume(int delta) async {
+    final current = await queryVolume() ?? 100;
+    await setVolume((current + delta).clamp(0, 100));
+  }
+
+  Future<void> setAudioTrack(int index) async {
+    _log.info('Setting audio track to Jellyfin stream index: $index');
+
+    if (index < 0) {
+      await _sendCommand(['set_property', 'aid', 'no']);
+      _log.info('Audio track disabled');
+      return;
+    }
+
+    // Jellyfin sends absolute container stream indices
+    // mpv's set_property aid can accept absolute stream IDs directly
+    // Pass through without conversion
+    _log.info('Setting mpv aid=$index (absolute stream ID from container)');
+    await _sendCommand(['set_property', 'aid', index]);
+    _log.info('Audio track set to aid=$index');
+  }
+
+  Future<void> setSubtitleTrack(int index) async {
+    _log.info('Setting subtitle track to Jellyfin stream index: $index');
+
+    if (index < 0) {
+      await _sendCommand(['set_property', 'sid', 'no']);
+      _log.info('Subtitle track disabled');
+      return;
+    }
+
+    // Jellyfin sends absolute container stream indices
+    // mpv's set_property sid can accept absolute stream IDs directly
+    // Pass through without conversion
+    _log.info('Setting mpv sid=$index (absolute stream ID from container)');
+    await _sendCommand(['set_property', 'sid', index]);
+    _log.info('Subtitle track set to sid=$index');
+  }
+
+  Future<void> setFullscreen(bool value) async {
+    await _sendCommand(['set_property', 'fullscreen', value]);
+  }
+
+  Future<void> toggleFullscreen() async {
+    await _sendCommand(['cycle', 'fullscreen']);
+  }
+
+  Future<void> _observeProperty(String property) async {
+    await _sendCommand(['observe_property', _nextRequestId++, property]);
   }
 
   Future<dynamic> _sendCommand(List<dynamic> command) async {
@@ -158,10 +299,22 @@ class MpvController {
     try {
       final decoded = jsonDecode(line);
       if (decoded is Map<String, dynamic>) {
+        // Handle command responses
         final requestId = decoded['request_id'];
         if (requestId is int) {
           final completer = _pendingRequests.remove(requestId);
           completer?.complete(decoded['data']);
+          return;
+        }
+
+        // Handle property change events
+        final event = decoded['event'];
+        if (event == 'property-change') {
+          final property = decoded['name'] as String?;
+          final data = decoded['data'];
+          if (property != null) {
+            _propertyChangeController.add(MpvPropertyChange(property, data));
+          }
           return;
         }
       }

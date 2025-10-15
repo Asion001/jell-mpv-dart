@@ -116,6 +116,7 @@ class PlaybackStartRequest {
     this.position = Duration.zero,
     this.isPaused = false,
     this.canSeek = true,
+    this.nowPlayingQueue,
   });
 
   final String itemId;
@@ -124,6 +125,7 @@ class PlaybackStartRequest {
   final Duration position;
   final bool isPaused;
   final bool canSeek;
+  final List<QueueItem>? nowPlayingQueue;
 
   Map<String, dynamic> toJson() {
     return {
@@ -133,6 +135,23 @@ class PlaybackStartRequest {
       'IsPaused': isPaused,
       'CanSeek': canSeek,
       'PositionTicks': durationToTicks(position),
+      if (nowPlayingQueue != null)
+        'NowPlayingQueue': nowPlayingQueue!.map((e) => e.toJson()).toList(),
+    };
+  }
+}
+
+/// Represents a queue item in the playlist.
+class QueueItem {
+  QueueItem({required this.id, this.playlistItemId});
+
+  final String id;
+  final String? playlistItemId;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'Id': id,
+      if (playlistItemId != null) 'PlaylistItemId': playlistItemId,
     };
   }
 }
@@ -146,6 +165,10 @@ class PlaybackProgressRequest {
     required this.position,
     this.isPaused = false,
     this.isMuted = false,
+    this.volumeLevel,
+    this.audioStreamIndex,
+    this.subtitleStreamIndex,
+    this.nowPlayingQueue,
   });
 
   final String itemId;
@@ -154,6 +177,10 @@ class PlaybackProgressRequest {
   final Duration position;
   final bool isPaused;
   final bool isMuted;
+  final int? volumeLevel;
+  final int? audioStreamIndex;
+  final int? subtitleStreamIndex;
+  final List<QueueItem>? nowPlayingQueue;
 
   Map<String, dynamic> toJson() {
     return {
@@ -162,7 +189,13 @@ class PlaybackProgressRequest {
       'PlaySessionId': playSessionId,
       'IsPaused': isPaused,
       'IsMuted': isMuted,
+      if (volumeLevel != null) 'VolumeLevel': volumeLevel,
+      if (audioStreamIndex != null) 'AudioStreamIndex': audioStreamIndex,
+      if (subtitleStreamIndex != null)
+        'SubtitleStreamIndex': subtitleStreamIndex,
       'PositionTicks': durationToTicks(position),
+      if (nowPlayingQueue != null)
+        'NowPlayingQueue': nowPlayingQueue!.map((e) => e.toJson()).toList(),
     };
   }
 }

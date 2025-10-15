@@ -6,3 +6,4 @@
 # Do not track in version control
 config.yaml
 openapi
+**.log

@@ -41,7 +41,10 @@ class JellyfinApi {
 
   Future<Map<String, dynamic>> getItem(String itemId) async {
     final response = await client.get(
-      config.buildUri('Items/$itemId'),
+      config.buildUri(
+        'Items/$itemId',
+        queryParameters: {'fields': 'MediaStreams'},
+      ),
       headers: _getHeaders(),
     );
     _ensureSuccess(response, 'GET Items/$itemId');
@@ -108,8 +111,8 @@ class JellyfinApi {
     _ensureSuccess(response, 'POST Sessions/Playing/Stopped');
   }
 
-  Future<void> announceCapabilities() async {
-    final capabilities = {
+  Map<String, dynamic> _getCapabilities() {
+    return {
       'PlayableMediaTypes': ['Video', 'Audio'],
       'SupportedCommands': [
         'Play',
@@ -121,13 +124,17 @@ class JellyfinApi {
         'Mute',
         'Unmute',
         'ToggleMute',
+        'ToggleFullscreen',
         'VolumeUp',
         'VolumeDown',
       ],
       'SupportsMediaControl': true,
       'SupportsPersistentIdentifier': true,
     };
+  }
 
+  Future<void> announceCapabilities() async {
+    final capabilities = _getCapabilities();
     final body = jsonEncode(capabilities);
     print('DEBUG: Announcing capabilities: $body');
 
@@ -147,24 +154,7 @@ class JellyfinApi {
     await client.post(
       config.buildUri('Sessions/Capabilities/Full'),
       headers: {..._getHeaders(), 'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'PlayableMediaTypes': ['Video', 'Audio'],
-        'SupportedCommands': [
-          'Play',
-          'PlayState',
-          'PlayNext',
-          'SetAudioStreamIndex',
-          'SetSubtitleStreamIndex',
-          'SetVolume',
-          'Mute',
-          'Unmute',
-          'ToggleMute',
-          'VolumeUp',
-          'VolumeDown',
-        ],
-        'SupportsMediaControl': true,
-        'SupportsPersistentIdentifier': true,
-      }),
+      body: jsonEncode(_getCapabilities()),
     );
   }
 
