@@ -62,7 +62,12 @@ class JellyfinSocketMessage with _$JellyfinSocketMessage {
 
 /// Jellyfin "Play" directive payload.
 @freezed
-class PlayRequest with _$PlayRequest {
+abstract class PlayRequest with _$PlayRequest {
+  @JsonSerializable(
+    explicitToJson: true,
+    includeIfNull: false,
+    fieldRename: FieldRename.pascal,
+  )
   const factory PlayRequest({
     required List<String> itemIds,
     @Default('PlayNow') String playCommand,
@@ -77,43 +82,8 @@ class PlayRequest with _$PlayRequest {
 
   const PlayRequest._();
 
-  factory PlayRequest.fromJson(Map<String, dynamic> json) {
-    final rawItems = json['ItemIds'];
-    final ids = <String>[];
-    if (rawItems is Iterable) {
-      for (final item in rawItems) {
-        ids.add(item.toString());
-      }
-    } else if (rawItems != null) {
-      ids.add(rawItems.toString());
-    }
-
-    // Handle StartIndex with proper type checking
-    int? startIdx;
-    final startPlaylistIndex = json['StartPlaylistIndex'];
-    final startIndexValue = json['StartIndex'];
-    if (startPlaylistIndex is num) {
-      startIdx = startPlaylistIndex.toInt();
-    } else if (startIndexValue is num) {
-      startIdx = startIndexValue.toInt();
-    }
-
-    return PlayRequest(
-      itemIds: ids,
-      playCommand: json['PlayCommand']?.toString() ?? 'PlayNow',
-      playSessionId: json['PlaySessionId']?.toString(),
-      startIndex: startIdx,
-      startPosition: durationFromTicks(json['StartPositionTicks']),
-      mediaSourceId: json['MediaSourceId']?.toString(),
-      audioStreamIndex: json['AudioStreamIndex'] is num
-          ? (json['AudioStreamIndex'] as num).toInt()
-          : null,
-      subtitleStreamIndex: json['SubtitleStreamIndex'] is num
-          ? (json['SubtitleStreamIndex'] as num).toInt()
-          : null,
-      controllingUserId: json['ControllingUserId']?.toString(),
-    );
-  }
+  factory PlayRequest.fromJson(Map<String, dynamic> json) =>
+      _$PlayRequestFromJson(json);
 
   String chooseItemId() {
     if (itemIds.isEmpty) {
@@ -131,6 +101,11 @@ class PlayRequest with _$PlayRequest {
 /// Payload for POST /Sessions/Playing.
 @freezed
 class PlaybackStartRequest with _$PlaybackStartRequest {
+  @JsonSerializable(
+    explicitToJson: true,
+    includeIfNull: false,
+    fieldRename: FieldRename.pascal,
+  )
   const factory PlaybackStartRequest({
     required String itemId,
     required String mediaSourceId,
@@ -145,24 +120,6 @@ class PlaybackStartRequest with _$PlaybackStartRequest {
       _$PlaybackStartRequestFromJson(json);
 }
 
-/// Extension to convert PlaybackStartRequest to Jellyfin API format
-extension PlaybackStartRequestJson on PlaybackStartRequest {
-  Map<String, dynamic> toJellyfinJson() {
-    return <String, dynamic>{
-      'ItemId': itemId,
-      'MediaSourceId': mediaSourceId,
-      'PlaySessionId': playSessionId,
-      'IsPaused': isPaused,
-      'CanSeek': canSeek,
-      'PositionTicks': durationToTicks(position),
-      if (nowPlayingQueue != null)
-        'NowPlayingQueue': nowPlayingQueue!
-            .map((e) => e.toJellyfinJson())
-            .toList(),
-    };
-  }
-}
-
 /// Represents a queue item in the playlist.
 @freezed
 class QueueItem with _$QueueItem {
@@ -175,19 +132,14 @@ class QueueItem with _$QueueItem {
       _$QueueItemFromJson(json);
 }
 
-/// Extension to convert QueueItem to Jellyfin API format
-extension QueueItemJson on QueueItem {
-  Map<String, dynamic> toJellyfinJson() {
-    return <String, dynamic>{
-      'Id': id,
-      if (playlistItemId != null) 'PlaylistItemId': playlistItemId,
-    };
-  }
-}
-
 /// Payload for POST /Sessions/Playing/Progress.
 @freezed
 class PlaybackProgressRequest with _$PlaybackProgressRequest {
+  @JsonSerializable(
+    explicitToJson: true,
+    includeIfNull: false,
+    fieldRename: FieldRename.pascal,
+  )
   const factory PlaybackProgressRequest({
     required String itemId,
     required String mediaSourceId,
@@ -205,31 +157,14 @@ class PlaybackProgressRequest with _$PlaybackProgressRequest {
       _$PlaybackProgressRequestFromJson(json);
 }
 
-/// Extension to convert PlaybackProgressRequest to Jellyfin API format
-extension PlaybackProgressRequestJson on PlaybackProgressRequest {
-  Map<String, dynamic> toJellyfinJson() {
-    return <String, dynamic>{
-      'ItemId': itemId,
-      'MediaSourceId': mediaSourceId,
-      'PlaySessionId': playSessionId,
-      'IsPaused': isPaused,
-      'IsMuted': isMuted,
-      if (volumeLevel != null) 'VolumeLevel': volumeLevel,
-      if (audioStreamIndex != null) 'AudioStreamIndex': audioStreamIndex,
-      if (subtitleStreamIndex != null)
-        'SubtitleStreamIndex': subtitleStreamIndex,
-      'PositionTicks': durationToTicks(position),
-      if (nowPlayingQueue != null)
-        'NowPlayingQueue': nowPlayingQueue!
-            .map((e) => e.toJellyfinJson())
-            .toList(),
-    };
-  }
-}
-
 /// Payload for POST /Sessions/Playing/Stopped.
 @freezed
 class PlaybackStopRequest with _$PlaybackStopRequest {
+  @JsonSerializable(
+    explicitToJson: true,
+    includeIfNull: false,
+    fieldRename: FieldRename.pascal,
+  )
   const factory PlaybackStopRequest({
     required String itemId,
     required String mediaSourceId,
@@ -239,16 +174,4 @@ class PlaybackStopRequest with _$PlaybackStopRequest {
 
   factory PlaybackStopRequest.fromJson(Map<String, dynamic> json) =>
       _$PlaybackStopRequestFromJson(json);
-}
-
-/// Extension to convert PlaybackStopRequest to Jellyfin API format
-extension PlaybackStopRequestJson on PlaybackStopRequest {
-  Map<String, dynamic> toJellyfinJson() {
-    return <String, dynamic>{
-      'ItemId': itemId,
-      'MediaSourceId': mediaSourceId,
-      'PlaySessionId': playSessionId,
-      'PositionTicks': durationToTicks(position),
-    };
-  }
 }

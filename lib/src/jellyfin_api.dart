@@ -93,7 +93,7 @@ class JellyfinApi {
     final response = await client.post(
       config.buildUri('Sessions/Playing'),
       headers: {..._getHeaders(), 'Content-Type': 'application/json'},
-      body: jsonEncode(req.toJellyfinJson()),
+      body: jsonEncode(req.toJson()),
     );
     _ensureSuccess(response, 'POST Sessions/Playing');
   }
@@ -102,7 +102,7 @@ class JellyfinApi {
     final response = await client.post(
       config.buildUri('Sessions/Playing/Progress'),
       headers: {..._getHeaders(), 'Content-Type': 'application/json'},
-      body: jsonEncode(req.toJellyfinJson()),
+      body: jsonEncode(req.toJson()),
     );
     _ensureSuccess(response, 'POST Sessions/Playing/Progress');
   }
@@ -111,7 +111,7 @@ class JellyfinApi {
     final response = await client.post(
       config.buildUri('Sessions/Playing/Stopped'),
       headers: {..._getHeaders(), 'Content-Type': 'application/json'},
-      body: jsonEncode(req.toJellyfinJson()),
+      body: jsonEncode(req.toJson()),
     );
     _ensureSuccess(response, 'POST Sessions/Playing/Stopped');
   }
