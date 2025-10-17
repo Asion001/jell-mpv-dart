@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:jell_mpv_dart/src/config.dart';
+import 'package:jell_mpv_dart/src/state.dart';
 import 'package:path/path.dart' as p;
 import 'package:talker/talker.dart';
 
@@ -34,8 +35,11 @@ class MpvController {
   Process? _process;
   Socket? _ipcSocket;
   StreamSubscription<String>? _ipcSubscription;
+  StreamSubscription<MpvPropertyChange>? _volumeSubscription;
+  StreamSubscription<MpvPropertyChange>? _muteSubscription;
   String? _ipcPath;
   int _nextRequestId = 1;
+  AppState _state = const AppState();
 
   Stream<int> get onExit => _exitController.stream;
   Stream<MpvPropertyChange> get onPropertyChange =>
@@ -50,6 +54,9 @@ class MpvController {
     int? audioStreamIndex,
     int? subtitleStreamIndex,
   }) async {
+    // Load saved state before starting playback
+    await _loadState();
+
     await stop();
     final ipcPath = await _prepareIpcPath();
     final args = <String>[
@@ -61,6 +68,8 @@ class MpvController {
       // Pass them directly to mpv
       if (audioStreamIndex != null) '--aid=$audioStreamIndex',
       if (subtitleStreamIndex != null) '--sid=$subtitleStreamIndex',
+      // Apply saved volume if available
+      '--volume=${_state.volume}',
       ...config.mpvArgs,
       mediaUrl.toString(),
     ];
@@ -68,10 +77,6 @@ class MpvController {
     final process = await Process.start(config.mpvExecutable, args);
     _process = process;
 
-    process.stdout
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .listen((line) => _log.verbose('mpv stdout: $line'));
     process.stderr
         .transform(utf8.decoder)
         .transform(const LineSplitter())
@@ -97,6 +102,35 @@ class MpvController {
     await _observeProperty('time-pos');
     await _observeProperty('volume');
     await _observeProperty('mute');
+
+    // Cancel any existing volume subscription
+    await _volumeSubscription?.cancel();
+
+    // Listen for volume changes and save them
+    _volumeSubscription = _propertyChangeController.stream
+        .where((change) => change.property == 'volume')
+        .listen((change) {
+          if (change.value is num) {
+            final volume = (change.value as num).round();
+            if (volume >= 0 && volume <= 100) {
+              _state = _state.copyWith(volume: volume);
+              unawaited(_saveState());
+            }
+          }
+        });
+
+    // Cancel any existing mute subscription
+    await _muteSubscription?.cancel();
+
+    // Listen for mute changes and save them
+    _muteSubscription = _propertyChangeController.stream
+        .where((change) => change.property == 'mute')
+        .listen((change) {
+          if (change.value is bool) {
+            _state = _state.copyWith(muted: change.value as bool);
+            unawaited(_saveState());
+          }
+        });
   }
 
   Future<void> stop() async {
@@ -107,13 +141,31 @@ class MpvController {
     try {
       await _sendCommand(['quit']);
       await process.exitCode.timeout(const Duration(seconds: 2));
-    } on TimeoutException {
-      _log.warning('mpv quit timeout, sending SIGTERM');
-      process.kill();
-      await process.exitCode;
-    } finally {
       await _cleanup();
+    } catch (e) {
+      _log.warning('mpv quit error: $e, sending SIGTERM');
+      await kill();
     }
+  }
+
+  Future<void> kill() async {
+    final process = _process;
+    if (process == null) {
+      return;
+    }
+    _log.warning('Killing mpv process');
+    try {
+      process.kill();
+      final code = await process.exitCode.timeout(
+        const Duration(milliseconds: 500),
+      );
+      if (code != 0) throw Exception('mpv exited with code $code');
+    } catch (e) {
+      _log.warning('Failed to terminate mpv process: $e. Killing forcefully.');
+      process.kill(ProcessSignal.sigkill);
+      await process.exitCode;
+    }
+    await _cleanup();
   }
 
   Future<Duration?> queryPosition() async {
@@ -191,10 +243,18 @@ class MpvController {
     _log.info('MpvController.setVolume: Setting volume to $clampedValue');
     await _sendCommand(['set_property', 'volume', clampedValue]);
     _log.info('MpvController.setVolume: Command sent');
+
+    // Save the volume for future playback
+    _state = _state.copyWith(volume: clampedValue);
+    await _saveState();
   }
 
   Future<void> setMute(bool value) async {
     await _sendCommand(['set_property', 'mute', value]);
+
+    // Save the mute state for future playback
+    _state = _state.copyWith(muted: value);
+    await _saveState();
   }
 
   Future<void> adjustVolume(int delta) async {
@@ -276,12 +336,15 @@ class MpvController {
   Future<void> _attachIpc(String socketPath) async {
     final address = InternetAddress(socketPath, type: InternetAddressType.unix);
     final stopwatch = Stopwatch()..start();
+    Object? error;
     while (stopwatch.elapsed < const Duration(seconds: 5)) {
-      if (File(socketPath).existsSync()) {
+      // ignore: avoid_slow_async_io
+      if (await File(socketPath).exists()) {
         try {
           _ipcSocket = await Socket.connect(address, 0);
           break;
-        } catch (_) {
+        } catch (e) {
+          error = e;
           await Future<void>.delayed(const Duration(milliseconds: 100));
         }
       } else {
@@ -289,7 +352,7 @@ class MpvController {
       }
     }
     if (_ipcSocket == null) {
-      throw StateError('Failed to connect to mpv IPC socket.');
+      throw StateError('Failed to connect to mpv IPC socket: $error');
     }
     _ipcSubscription = utf8.decoder
         .bind(_ipcSocket!)
@@ -332,6 +395,10 @@ class MpvController {
   Future<void> _cleanup() async {
     await _ipcSubscription?.cancel();
     _ipcSubscription = null;
+    await _volumeSubscription?.cancel();
+    _volumeSubscription = null;
+    await _muteSubscription?.cancel();
+    _muteSubscription = null;
     _ipcSocket?.destroy();
     _ipcSocket = null;
     _process = null;
@@ -352,5 +419,25 @@ class MpvController {
       }
     }
     _pendingRequests.clear();
+  }
+
+  /// Load the application state from disk.
+  Future<void> _loadState() async {
+    try {
+      _state = await AppState.load();
+      _log.debug('Loaded state: $_state');
+    } catch (error, stackTrace) {
+      _log.warning('Failed to load state', error, stackTrace);
+    }
+  }
+
+  /// Save the current application state to disk.
+  Future<void> _saveState() async {
+    try {
+      await _state.save();
+      _log.debug('Saved state: volume=${_state.volume}, muted=${_state.muted}');
+    } catch (error, stackTrace) {
+      _log.warning('Failed to save state', error, stackTrace);
+    }
   }
 }

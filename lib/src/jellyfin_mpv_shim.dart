@@ -107,23 +107,32 @@ class JellyfinMpvShim {
   }
 
   Future<void> shutdown() async {
-    if (_done.isCompleted) {
-      return;
+    try {
+      await Future(
+        () async {
+          if (_done.isCompleted) {
+            return;
+          }
+          _log.info('Shutting down Jellyfin → mpv shim.');
+          _progressTimer?.cancel();
+          _progressTimer = null;
+          await _wsSubscription?.cancel();
+          await _mpvPropertySubscription?.cancel();
+          await websocket.close();
+          await mpv.kill();
+          await _lastPlaybackClose;
+          await api.close();
+          await _mpvSubscription?.cancel();
+          if (!_done.isCompleted) {
+            _done.complete();
+          }
+        },
+      ).timeout(const Duration(seconds: 2));
+    } catch (e) {
+      _log.warning('Error during shutdown', e);
+    } finally {
+      exit(0);
     }
-    _log.info('Shutting down Jellyfin → mpv shim.');
-    _progressTimer?.cancel();
-    _progressTimer = null;
-    await _wsSubscription?.cancel();
-    await _mpvPropertySubscription?.cancel();
-    await websocket.close();
-    await mpv.stop();
-    await _lastPlaybackClose;
-    await api.close();
-    await _mpvSubscription?.cancel();
-    if (!_done.isCompleted) {
-      _done.complete();
-    }
-    exit(0);
   }
 
   void _handlePropertyChange(MpvPropertyChange change) {
