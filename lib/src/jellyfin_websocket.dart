@@ -2,28 +2,30 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:logging/logging.dart';
+import 'package:jell_mpv_dart/src/config.dart';
+import 'package:jell_mpv_dart/src/models.dart';
 import 'package:retry/retry.dart';
+import 'package:talker/talker.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
-
-import 'config.dart';
-import 'models.dart';
 
 class JellyfinWebSocket {
   JellyfinWebSocket(this.config)
     : _retry = RetryOptions(
-        maxAttempts: 8,
         delayFactor: config.startupReconnectBackoff,
       );
 
   final JellyfinConfig config;
-  final _log = Logger('JellyfinWebSocket');
+  final _log = Talker(
+    logger: TalkerLogger(
+      settings: TalkerLoggerSettings(defaultTitle: 'JellyfinWebSocket'),
+    ),
+  );
   final _controller = StreamController<JellyfinSocketMessage>.broadcast();
   final RetryOptions _retry;
 
   WebSocketChannel? _channel;
-  StreamSubscription? _subscription;
+  StreamSubscription<dynamic>? _subscription;
   Timer? _keepAlive;
   bool _closed = false;
   final Completer<void> _readyCompleter = Completer<void>();
@@ -89,30 +91,30 @@ class JellyfinWebSocket {
         _controller.add(message);
       }
     } catch (error, stackTrace) {
-      _log.severe('Failed to decode WebSocket message', error, stackTrace);
+      _log.critical('Failed to decode WebSocket message', error, stackTrace);
     }
   }
 
-  void _handleError(Object error, StackTrace stackTrace) {
-    _log.severe('WebSocket error', error, stackTrace);
-    _teardownChannel();
+  Future<void> _handleError(Object error, StackTrace stackTrace) async {
+    _log.critical('WebSocket error', error, stackTrace);
+    await _teardownChannel();
     if (!_closed) {
       unawaited(_connectWithRetry());
     }
   }
 
-  void _handleDone() {
+  Future<void> _handleDone() async {
     _log.warning('WebSocket connection closed.');
-    _teardownChannel();
+    await _teardownChannel();
     if (!_closed) {
       unawaited(_connectWithRetry());
     }
   }
 
-  void _teardownChannel() {
+  Future<void> _teardownChannel() async {
     _keepAlive?.cancel();
     _keepAlive = null;
-    _subscription?.cancel();
+    await _subscription?.cancel();
     _subscription = null;
     _channel = null;
   }
@@ -136,12 +138,12 @@ class JellyfinWebSocket {
       decoded = jsonDecode(payload) as Map<String, dynamic>?;
     }
     if (decoded == null) {
-      _log.fine('Dropping non-JSON message: $payload');
+      _log.critical('Dropping non-JSON message: $payload');
       return null;
     }
     final type = decoded['MessageType']?.toString();
     if (type == null) {
-      _log.fine('Message without MessageType: $decoded');
+      _log.critical('Message without MessageType: $decoded');
       return null;
     }
     return JellyfinSocketMessage(type: type, rawData: decoded['Data']);

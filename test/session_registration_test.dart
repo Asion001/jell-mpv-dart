@@ -1,10 +1,11 @@
+// ignore_for_file: avoid_print
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:jell_mpv_dart/jell_mpv_dart.dart';
-import 'package:logging/logging.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -15,15 +16,6 @@ void main() {
     late http.Client httpClient;
 
     setUpAll(() async {
-      // Enable logging
-      Logger.root.level = Level.ALL;
-      Logger.root.onRecord.listen((record) {
-        print('${record.level.name}: ${record.loggerName}: ${record.message}');
-        if (record.error != null) {
-          print('  Error: ${record.error}');
-        }
-      });
-
       // Load config from config.yaml
       final configFile = File('config.yaml');
       if (!configFile.existsSync()) {
@@ -58,7 +50,7 @@ void main() {
 
         // Wait for connection to establish and capabilities to be announced
         print('Waiting for shim to connect and announce capabilities...');
-        await Future.delayed(const Duration(seconds: 5));
+        await Future<void>.delayed(const Duration(seconds: 5));
 
         // Query all Sessions first
         final allSessionsUri = config.buildUri('Sessions');
@@ -116,15 +108,21 @@ void main() {
         }
 
         // Find our device in all sessions (not just controllable ones)
-        final ourSession = allSessions.cast<Map?>().firstWhere(
-          (session) => session?['DeviceId'] == config.deviceId,
-          orElse: () => null,
-        );
+        final ourSession = allSessions
+            .cast<Map<dynamic, dynamic>?>()
+            .firstWhere(
+              (session) => session?['DeviceId'] == config.deviceId,
+              orElse: () => null,
+            );
 
         if (ourSession == null) {
+          final availableDevices = allSessions
+              .map((s) => s is Map ? s['DeviceName'] : 'unknown')
+              .join(', ');
           fail(
-            'Device "${config.deviceName}" (${config.deviceId}) not found in sessions. '
-            'Available devices: ${allSessions.map((s) => s is Map ? s['DeviceName'] : 'unknown').join(', ')}',
+            'Device "${config.deviceName}" (${config.deviceId}) not found'
+            ' in sessions. '
+            'Available devices: $availableDevices',
           );
         }
         print('\nOur session found:');
@@ -149,7 +147,7 @@ void main() {
         print('   Actual: $sessionUserId');
 
         if (sessionUserId == null) {
-          print('❌ Session has NO UserId! This is why it\'s not controllable!');
+          print("❌ Session has NO UserId! This is why it's not controllable!");
         } else if (sessionUserId != config.userId) {
           print('❌ Session has WRONG UserId!');
         } else {
@@ -172,7 +170,8 @@ void main() {
           print('   This means it won\'t appear in "Play on" dialog.');
         }
 
-        // NOTE: Currently Jellyfin doesn't mark this as SupportsRemoteControl=true
+        // NOTE: Currently Jellyfin doesn't mark this as
+        // SupportsRemoteControl=true
         // despite having all the correct capabilities announced.
         // The session IS created with PlayableMediaTypes and SupportedCommands.
         // This might be a Jellyfin server-side issue with how it determines
@@ -180,7 +179,8 @@ void main() {
         print('\n✅ Session registered with capabilities!');
         if (!supportsRemoteControl) {
           print(
-            '⚠️  Note: Jellyfin is not marking it as remotely controllable yet.',
+            '⚠️  Note: Jellyfin is not marking it as '
+            'remotely controllable yet.',
           );
           print('   Investigating why...');
         }
@@ -197,7 +197,7 @@ void main() {
         print('The accessToken MUST be a USER-SPECIFIC API key.');
         print('When creating the API key in Jellyfin, ensure:');
         print('1. You are logged in as the user');
-        print('2. Create the key under that user\'s settings');
+        print("2. Create the key under that user's settings");
         print('3. The key will be automatically associated with that user');
         print('');
         print('If using a system-wide API key, sessions will be anonymous.');

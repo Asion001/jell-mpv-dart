@@ -6,4 +6,21 @@
 # Do not track in version control
 config.yaml
 openapi
-**.log
+.history/
+*.log
+
+# Vscode files
+.vscode/settings.json
+
+# Generated files
+**/*_generated.dart
+**/*.freezed.dart
+**/*.g.dart
+**/*.gen.dart
+
+# IntelliJ
+.idea/
+
+# Server
+.secret*
+.DS_Store

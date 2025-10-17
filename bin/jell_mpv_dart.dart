@@ -2,9 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:args/args.dart';
-import 'package:logging/logging.dart';
-
 import 'package:jell_mpv_dart/jell_mpv_dart.dart';
+import 'package:talker/talker.dart';
 
 const _cliVersion = '0.1.0';
 
@@ -105,14 +104,16 @@ Future<void> main(List<String> arguments) async {
     return;
   }
 
-  _configureLogging(verbose: _getFlag(argResults, 'verbose'));
-  final log = Logger('CLI');
+  final settings = _configureLogging(verbose: _getFlag(argResults, 'verbose'));
+  final log = Talker(
+    logger: TalkerLogger(settings: settings),
+  );
 
   JellyfinConfig config;
   try {
     config = await _loadConfig(argResults);
   } catch (error, stackTrace) {
-    log.severe('Failed to load configuration', error, stackTrace);
+    log.critical('Failed to load configuration', error, stackTrace);
     exitCode = 78; // EX_CONFIG
     return;
   }
@@ -123,36 +124,22 @@ Future<void> main(List<String> arguments) async {
   try {
     await shim.run();
   } catch (error, stackTrace) {
-    log.severe('An unrecoverable error occurred', error, stackTrace);
+    log.critical('An unrecoverable error occurred', error, stackTrace);
     exitCode = 1;
   }
 }
 
 void _printUsage(ArgParser parser) {
-  stdout.writeln('Usage: jell_mpv_dart [options]\n');
-  stdout.writeln(parser.usage);
+  stdout
+    ..writeln('Usage: jell_mpv_dart [options]\n')
+    ..writeln(parser.usage);
 }
 
-void _configureLogging({required bool verbose}) {
-  Logger.root.level = verbose ? Level.FINE : Level.INFO;
-  Logger.root.onRecord.listen((record) {
-    final sink = record.level >= Level.WARNING ? stderr : stdout;
-    final buffer = StringBuffer()
-      ..write(record.time.toIso8601String())
-      ..write(' ')
-      ..write(record.level.name.padRight(7))
-      ..write(' ')
-      ..write(record.loggerName)
-      ..write(' - ')
-      ..write(record.message);
-    sink.writeln(buffer.toString());
-    if (record.error != null) {
-      sink.writeln('  error: ${record.error}');
-    }
-    if (record.stackTrace != null && verbose) {
-      sink.writeln(record.stackTrace);
-    }
-  });
+TalkerLoggerSettings _configureLogging({required bool verbose}) {
+  return TalkerLoggerSettings(
+    defaultTitle: 'CLI',
+    level: verbose ? LogLevel.verbose : LogLevel.info,
+  );
 }
 
 Future<JellyfinConfig> _loadConfig(ArgResults args) async {
@@ -197,29 +184,33 @@ Future<JellyfinConfig> _loadConfig(ArgResults args) async {
       accessToken: token,
       username: username,
       password: password,
-      mpvExecutable: mpvBinary,
-      mpvArgs: mpvArgs,
-      keepAliveInterval: keepAlive != null ? _parseDuration(keepAlive) : null,
+      mpvExecutable: mpvBinary ?? 'mpv',
+      mpvArgs: mpvArgs.isNotEmpty ? mpvArgs : const <String>[],
+      keepAliveInterval: keepAlive != null
+          ? _parseDuration(keepAlive)
+          : const Duration(seconds: 15),
       playbackProgressInterval: progress != null
           ? _parseDuration(progress)
-          : null,
+          : const Duration(seconds: 30),
     );
   }
 
   return base.copyWith(
-    server: server != null ? Uri.parse(server) : null,
-    userId: userId,
-    deviceId: deviceId,
-    deviceName: deviceName,
-    accessToken: token,
-    username: username,
-    password: password,
-    mpvExecutable: mpvBinary,
-    mpvArgs: mpvArgs.isNotEmpty ? mpvArgs : null,
-    keepAliveInterval: keepAlive != null ? _parseDuration(keepAlive) : null,
+    server: server != null ? Uri.parse(server) : base.server,
+    userId: userId ?? base.userId,
+    deviceId: deviceId ?? base.deviceId,
+    deviceName: deviceName ?? base.deviceName,
+    accessToken: token ?? base.accessToken,
+    username: username ?? base.username,
+    password: password ?? base.password,
+    mpvExecutable: mpvBinary ?? base.mpvExecutable,
+    mpvArgs: mpvArgs.isNotEmpty ? mpvArgs : base.mpvArgs,
+    keepAliveInterval: keepAlive != null
+        ? _parseDuration(keepAlive)
+        : base.keepAliveInterval,
     playbackProgressInterval: progress != null
         ? _parseDuration(progress)
-        : null,
+        : base.playbackProgressInterval,
   );
 }
 
@@ -263,7 +254,7 @@ Duration _parseDuration(String value) {
   return Duration(seconds: int.parse(value));
 }
 
-void _registerSignalHandlers(JellyfinMpvShim shim, Logger log) {
+void _registerSignalHandlers(JellyfinMpvShim shim, Talker log) {
   var shuttingDown = false;
 
   void handle(ProcessSignal signal) {

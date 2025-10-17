@@ -52,7 +52,7 @@ A Jellyfin playback client written in Dart that relays media playback commands f
 
 ### Authentication Methods
 
-**Method 1: Username/Password (Recommended)**
+#### Method 1: Username/Password (Recommended)
 
 ```yaml
 server: https://jellyfin.example.com
@@ -63,7 +63,7 @@ password: YOUR_PASSWORD
 
 This method authenticates with Jellyfin on startup and obtains a session token. Best for instances without the API Keys UI.
 
-**Method 2: API Key**
+#### Method 2: API Key
 
 ```yaml
 server: https://jellyfin.example.com

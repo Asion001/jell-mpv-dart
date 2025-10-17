@@ -1,14 +1,13 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:logging/logging.dart';
+import 'package:jell_mpv_dart/src/config.dart';
+import 'package:jell_mpv_dart/src/jellyfin_api.dart';
+import 'package:jell_mpv_dart/src/jellyfin_websocket.dart';
+import 'package:jell_mpv_dart/src/models.dart';
+import 'package:jell_mpv_dart/src/mpv_controller.dart';
+import 'package:talker/talker.dart';
 import 'package:uuid/uuid.dart';
-
-import 'config.dart';
-import 'jellyfin_api.dart';
-import 'jellyfin_websocket.dart';
-import 'models.dart';
-import 'mpv_controller.dart';
 
 class JellyfinMpvShim {
   JellyfinMpvShim({
@@ -24,12 +23,16 @@ class JellyfinMpvShim {
   final JellyfinApi api;
   final JellyfinWebSocket websocket;
   final MpvController mpv;
-  final _log = Logger('JellyfinMpvShim');
+  final _log = Talker(
+    logger: TalkerLogger(
+      settings: TalkerLoggerSettings(defaultTitle: 'JellyfinMpvShim'),
+    ),
+  );
   final _uuid = const Uuid();
 
-  StreamSubscription? _wsSubscription;
+  StreamSubscription<JellyfinSocketMessage>? _wsSubscription;
   StreamSubscription<int>? _mpvSubscription;
-  StreamSubscription? _mpvPropertySubscription;
+  StreamSubscription<MpvPropertyChange>? _mpvPropertySubscription;
   Timer? _progressTimer;
   final Completer<void> _done = Completer<void>();
   Future<void> _lastPlaybackClose = Future<void>.value();
@@ -62,15 +65,15 @@ class JellyfinMpvShim {
         );
         _log.info('Authentication successful.');
       } catch (error, stackTrace) {
-        _log.severe('Authentication failed', error, stackTrace);
+        _log.critical('Authentication failed', error, stackTrace);
         rethrow;
       }
     }
 
-    _mpvSubscription = mpv.onExit.listen((code) {
+    _mpvSubscription = mpv.onExit.listen((code) async {
       final future = _handleMpvExit(code);
       _lastPlaybackClose = future;
-      future.catchError((error, stackTrace) {
+      await future.catchError((Object error, StackTrace stackTrace) {
         _log.warning('Error during mpv exit handling', error, stackTrace);
       });
     });
@@ -83,8 +86,8 @@ class JellyfinMpvShim {
     await websocket.start(token: sessionToken);
     _wsSubscription = websocket.messages.listen(
       _handleSocketMessage,
-      onError: (error, stackTrace) {
-        _log.severe('WebSocket stream error', error, stackTrace);
+      onError: (Object error, StackTrace stackTrace) {
+        _log.critical('WebSocket stream error', error, stackTrace);
       },
     );
     await websocket.ready;
@@ -116,7 +119,7 @@ class JellyfinMpvShim {
     await mpv.stop();
     await _lastPlaybackClose;
     await api.close();
-    _mpvSubscription?.cancel();
+    await _mpvSubscription?.cancel();
     if (!_done.isCompleted) {
       _done.complete();
     }
@@ -124,13 +127,15 @@ class JellyfinMpvShim {
   }
 
   void _handlePropertyChange(MpvPropertyChange change) {
-    // Debounce rapid property changes - only report if > 2 seconds since last report
-    // This prevents flooding Jellyfin with updates while still being responsive
+    // Debounce rapid property changes - only report if > 2 seconds
+    // since last report
+    // This prevents flooding Jellyfin with updates while still
+    // being responsive
     final now = DateTime.now();
     final timeSinceLastReport = now.difference(_lastProgressReport);
 
     if (timeSinceLastReport.inSeconds >= 2) {
-      _log.fine('Property changed: ${change.property} = ${change.value}');
+      _log.debug('Property changed: ${change.property} = ${change.value}');
       _lastProgressReport = now;
       unawaited(_reportProgress());
     }
@@ -146,25 +151,22 @@ class JellyfinMpvShim {
         }
         final request = PlayRequest.fromJson(data);
         unawaited(_handlePlay(request));
-        break;
       case 'Playstate':
         final data = message.tryDecodeData();
         if (data == null) {
           _log.warning('Playstate message missing payload. ${message.rawData}');
           return;
         }
-        _log.fine('Playstate command: ${data['Command']}, payload: $data');
+        _log.debug('Playstate command: ${data['Command']}, payload: $data');
         unawaited(_handlePlaystate(data));
-        break;
       case 'GeneralCommand':
         final data = message.tryDecodeData();
         if (data != null) {
           _log.info('GeneralCommand received: ${data['Name']}, payload: $data');
           unawaited(_handleGeneralCommand(data));
         }
-        break;
       default:
-        _log.fine('Ignoring message ${message.type}');
+        _log.verbose('Ignoring message ${message.type}');
     }
   }
 
@@ -192,7 +194,7 @@ class JellyfinMpvShim {
     try {
       item = await api.getItem(itemId);
     } catch (error, stackTrace) {
-      _log.severe(
+      _log.debug(
         'Failed to fetch item metadata for $itemId',
         error,
         stackTrace,
@@ -221,7 +223,8 @@ class JellyfinMpvShim {
         final title = stream['DisplayTitle'] ?? '';
         final codec = stream['Codec'] ?? '';
         _log.info(
-          '  [$i] Type=$type, Index=$index, Lang=$lang, Codec=$codec, Title=$title',
+          '  [$i] Type=$type, Index=$index'
+          ' Lang=$lang, Codec=$codec, Title=$title',
         );
       }
     } else {
@@ -249,7 +252,8 @@ class JellyfinMpvShim {
       );
       if (mpvSubtitleStreamIndex != null) {
         _log.info(
-          'Initial playback: mapped Jellyfin subtitle index ${request.subtitleStreamIndex} to mpv sid=$mpvSubtitleStreamIndex',
+          'Initial playback: mapped Jellyfin subtitle index '
+          '${request.subtitleStreamIndex} to mpv sid=$mpvSubtitleStreamIndex',
         );
       }
     }
@@ -263,7 +267,7 @@ class JellyfinMpvShim {
         subtitleStreamIndex: mpvSubtitleStreamIndex,
       );
     } catch (error, stackTrace) {
-      _log.severe('Failed to launch mpv', error, stackTrace);
+      _log.debug('Failed to launch mpv', error, stackTrace);
       return;
     }
 
@@ -282,8 +286,6 @@ class JellyfinMpvShim {
           mediaSourceId: mediaSourceId,
           playSessionId: playSessionId,
           position: request.startPosition ?? Duration.zero,
-          isPaused: false,
-          canSeek: true,
           nowPlayingQueue: nowPlayingQueue,
         ),
       );
@@ -307,7 +309,6 @@ class JellyfinMpvShim {
         await _handlePlay(
           PlayRequest(
             itemIds: _playlist,
-            playCommand: 'PlayNow',
             playSessionId: _currentPlaySessionId,
             startIndex: _currentPlaylistIndex,
             startPosition: command == 'Seek'
@@ -331,19 +332,15 @@ class JellyfinMpvShim {
         final isPaused = await mpv.queryPaused();
         await mpv.setPause(!isPaused);
         await _reportProgress();
-        break;
       case 'Pause':
         await mpv.setPause(true);
         await _reportProgress();
-        break;
       case 'Unpause':
       case 'Play':
         await mpv.setPause(false);
         await _reportProgress();
-        break;
       case 'Stop':
         await mpv.stop();
-        break;
       case 'Seek':
         final position = durationFromTicks(payload['SeekPositionTicks']);
         _log.info('Seek to position: $position');
@@ -352,7 +349,6 @@ class JellyfinMpvShim {
           _lastKnownPosition = position;
           await _reportProgress(forcePosition: position);
         }
-        break;
       case 'SetVolume':
         final volume = payload['Volume'];
         _log.info('SetVolume to: $volume');
@@ -360,47 +356,43 @@ class JellyfinMpvShim {
           await mpv.setVolume(volume.round());
           await _reportProgress();
         }
-        break;
       case 'VolumeUp':
         await mpv.adjustVolume(5);
         await _reportProgress();
-        break;
       case 'VolumeDown':
         await mpv.adjustVolume(-5);
         await _reportProgress();
-        break;
       case 'Mute':
         await mpv.setMute(true);
         await _reportProgress();
-        break;
       case 'Unmute':
         await mpv.setMute(false);
         await _reportProgress();
-        break;
       case 'ToggleMute':
         final currentlyMuted = await mpv.queryMuted();
         await mpv.setMute(!currentlyMuted);
         await _reportProgress();
-        break;
       case 'SetAudioStreamIndex':
         final index = payload['Index'];
         if (index is num) {
           await mpv.setAudioTrack(index.round());
         }
-        break;
       case 'SetSubtitleStreamIndex':
         final index = payload['Index'];
         if (index is num) {
           final jellyfinIndex = index.round();
           _log.info(
-            'PlayState SetSubtitleStreamIndex to: $jellyfinIndex (Jellyfin stream index)',
+            'PlayState SetSubtitleStreamIndex to: $jellyfinIndex'
+            ' (Jellyfin stream index)',
           );
 
-          // Map Jellyfin's absolute stream index to mpv's subtitle track ID (sid)
+          // Map Jellyfin's absolute stream index to mpv's
+          // subtitle track ID (sid)
           final mpvSid = _mapJellyfinSubtitleIndexToMpvSid(jellyfinIndex);
           if (mpvSid != null) {
             _log.info(
-              'Mapped Jellyfin subtitle index $jellyfinIndex to mpv sid=$mpvSid',
+              'Mapped Jellyfin subtitle index $jellyfinIndex'
+              ' to mpv sid=$mpvSid',
             );
             await mpv.setSubtitleTrack(mpvSid);
           } else {
@@ -409,16 +401,13 @@ class JellyfinMpvShim {
             );
           }
         }
-        break;
       case 'NextTrack':
       case 'PlayNext':
         await _playNext();
-        break;
       case 'PreviousTrack':
         await _playPrevious();
-        break;
       default:
-        _log.fine('Unhandled playstate command: $command');
+        _log.debug('Unhandled playstate command: $command');
     }
   }
 
@@ -452,7 +441,6 @@ class JellyfinMpvShim {
         } else {
           _log.warning('Could not parse volume value: $volume');
         }
-        break;
       case 'SetAudioStreamIndex':
         final index = arguments?['Index'];
         final indexInt = index is num
@@ -460,12 +448,12 @@ class JellyfinMpvShim {
             : (index is String ? int.tryParse(index) : null);
         if (indexInt != null) {
           _log.info(
-            'GeneralCommand SetAudioStreamIndex to: $indexInt (raw from Jellyfin)',
+            'GeneralCommand SetAudioStreamIndex '
+            'to: $indexInt (raw from Jellyfin)',
           );
           await mpv.setAudioTrack(indexInt);
           await _reportProgress();
         }
-        break;
       case 'SetSubtitleStreamIndex':
         final index = arguments?['Index'];
         final indexInt = index is num
@@ -473,10 +461,12 @@ class JellyfinMpvShim {
             : (index is String ? int.tryParse(index) : null);
         if (indexInt != null) {
           _log.info(
-            'GeneralCommand SetSubtitleStreamIndex to: $indexInt (Jellyfin stream index)',
+            'GeneralCommand SetSubtitleStreamIndex '
+            'to: $indexInt (Jellyfin stream index)',
           );
 
-          // Map Jellyfin's absolute stream index to mpv's subtitle track ID (sid)
+          // Map Jellyfin's absolute stream index
+          // to mpv's subtitle track ID (sid)
           final mpvSid = _mapJellyfinSubtitleIndexToMpvSid(indexInt);
           if (mpvSid != null) {
             _log.info(
@@ -490,7 +480,6 @@ class JellyfinMpvShim {
           }
           await _reportProgress();
         }
-        break;
       case 'Seek':
         // Seek command in GeneralCommand has position in ticks
         final positionTicks = arguments?['SeekPositionTicks'];
@@ -503,36 +492,30 @@ class JellyfinMpvShim {
             await _reportProgress(forcePosition: position);
           }
         }
-        break;
       case 'Mute':
         _log.info('GeneralCommand Mute');
         await mpv.setMute(true);
         await _reportProgress();
-        break;
       case 'Unmute':
         _log.info('GeneralCommand Unmute');
         await mpv.setMute(false);
         await _reportProgress();
-        break;
       case 'ToggleMute':
         _log.info('GeneralCommand ToggleMute');
         final currentlyMuted = await mpv.queryMuted();
         await mpv.setMute(!currentlyMuted);
         await _reportProgress();
-        break;
       case 'ToggleFullscreen':
         _log.info('GeneralCommand ToggleFullscreen');
         await mpv.toggleFullscreen();
-        break;
       case 'SetFullscreen':
         final fullscreen = arguments?['Fullscreen'];
         if (fullscreen is bool) {
           _log.info('GeneralCommand SetFullscreen to: $fullscreen');
           await mpv.setFullscreen(fullscreen);
         }
-        break;
       default:
-        _log.fine('Unhandled general command: $commandName');
+        _log.debug('Unhandled general command: $commandName');
     }
   }
 
@@ -564,7 +547,6 @@ class JellyfinMpvShim {
     await _handlePlay(
       PlayRequest(
         itemIds: _playlist,
-        playCommand: 'PlayNow',
         playSessionId: _currentPlaySessionId,
         startIndex: _currentPlaylistIndex,
       ),
@@ -597,7 +579,6 @@ class JellyfinMpvShim {
     await _handlePlay(
       PlayRequest(
         itemIds: _playlist,
-        playCommand: 'PlayNow',
         playSessionId: _currentPlaySessionId,
         startIndex: _currentPlaylistIndex,
       ),
@@ -630,7 +611,8 @@ class JellyfinMpvShim {
     }
 
     // If exit code is 0 (normal exit) and we have more items in the playlist,
-    // automatically play the next one (but only if it wasn't a manual track change)
+    // automatically play the next one (but only
+    // if it wasn't a manual track change)
     if (exitCode == 0 &&
         !_isManualTrackChange &&
         _currentPlaylistIndex < _playlist.length - 1) {
@@ -666,9 +648,9 @@ class JellyfinMpvShim {
     }
 
     // Query current state from mpv
-    Duration? position = forcePosition;
-    bool isPaused = false;
-    bool isMuted = false;
+    var position = forcePosition;
+    var isPaused = false;
+    var isMuted = false;
     int? volumeLevel;
     int? audioStreamIndex;
     int? subtitleStreamIndex;
@@ -680,19 +662,21 @@ class JellyfinMpvShim {
       volumeLevel = await mpv.queryVolume();
       audioStreamIndex = await mpv.queryAudioTrack();
 
-      // Query mpv's subtitle track ID and map it back to Jellyfin's MediaStreams array index
+      // Query mpv's subtitle track ID and map it
+      // back to Jellyfin's MediaStreams array index
       final mpvSid = await mpv.querySubtitleTrack();
       if (mpvSid != null) {
         subtitleStreamIndex = _mapMpvSidToJellyfinStreamIndex(mpvSid);
         if (subtitleStreamIndex == null) {
-          _log.fine(
-            'Could not map mpv sid=$mpvSid back to Jellyfin MediaStreams index, using mpv sid directly',
+          _log.debug(
+            'Could not map mpv sid=$mpvSid back to Jellyfin MediaStreams index'
+            ' using mpv sid directly',
           );
           subtitleStreamIndex = mpvSid;
         }
       }
     } catch (error, stackTrace) {
-      _log.fine('Failed to query mpv state', error, stackTrace);
+      _log.debug('Failed to query mpv state', error, stackTrace);
       return;
     }
 
@@ -725,7 +709,7 @@ class JellyfinMpvShim {
         ),
       );
     } catch (error, stackTrace) {
-      _log.fine('Failed to report playback progress', error, stackTrace);
+      _log.debug('Failed to report playback progress', error, stackTrace);
     }
   }
 
@@ -761,12 +745,15 @@ class JellyfinMpvShim {
   /// Maps Jellyfin's subtitle stream index to mpv's subtitle track ID (sid).
   ///
   /// Jellyfin sends indices referring to positions in the MediaStreams array.
-  /// mpv uses sequential subtitle track IDs (sid=1, 2, 3...) for subtitle streams only.
-  /// We count how many subtitle streams appear before the selected one to get the mpv sid.
+  /// mpv uses sequential subtitle track IDs (sid=1, 2, 3...)
+  /// for subtitle streams only.
+  /// We count how many subtitle streams appear before the selected one
+  /// to get the mpv sid.
   int? _mapJellyfinSubtitleIndexToMpvSid(int jellyfinStreamIndex) {
     if (_currentMediaStreams.isEmpty) {
       _log.warning(
-        'No media streams available for mapping subtitle index $jellyfinStreamIndex',
+        'No media streams available for mapping subtitle'
+        ' index $jellyfinStreamIndex',
       );
       return null;
     }
@@ -774,7 +761,8 @@ class JellyfinMpvShim {
     if (jellyfinStreamIndex < 0 ||
         jellyfinStreamIndex >= _currentMediaStreams.length) {
       _log.warning(
-        'Jellyfin stream index $jellyfinStreamIndex is out of bounds (MediaStreams length=${_currentMediaStreams.length})',
+        'Jellyfin stream index $jellyfinStreamIndex is out of bounds'
+        ' (MediaStreams length=${_currentMediaStreams.length})',
       );
       return null;
     }
@@ -784,7 +772,8 @@ class JellyfinMpvShim {
 
     if (type != 'Subtitle') {
       _log.warning(
-        'Jellyfin MediaStreams[$jellyfinStreamIndex] is not a subtitle (type=$type)',
+        'Jellyfin MediaStreams[$jellyfinStreamIndex] is not'
+        ' a subtitle (type=$type)',
       );
       return null;
     }
@@ -802,16 +791,19 @@ class JellyfinMpvShim {
     final displayTitle = stream['DisplayTitle']?.toString() ?? '';
     final jellyfinIndex = stream['Index'];
     _log.info(
-      'Mapped Jellyfin MediaStreams[$jellyfinStreamIndex] (JF Index=$jellyfinIndex, $lang - $displayTitle) to mpv sid=$mpvSid',
+      'Mapped Jellyfin MediaStreams[$jellyfinStreamIndex]'
+      ' (JF Index=$jellyfinIndex, $lang - $displayTitle) to mpv sid=$mpvSid',
     );
 
     return mpvSid;
   }
 
-  /// Maps mpv's subtitle track ID (sid) back to Jellyfin's MediaStreams array index.
+  /// Maps mpv's subtitle track ID (sid) back to Jellyfin's
+  /// MediaStreams array index.
   ///
   /// This is the reverse of _mapJellyfinSubtitleIndexToMpvSid and is used
-  /// when reporting playback progress to Jellyfin. We find the Nth subtitle stream
+  /// when reporting playback progress to Jellyfin. We find the Nth
+  ///  subtitle stream
   /// in the array (where N = mpvSid) and return its array position.
   int? _mapMpvSidToJellyfinStreamIndex(int mpvSid) {
     if (_currentMediaStreams.isEmpty) {
@@ -827,15 +819,16 @@ class JellyfinMpvShim {
         currentSubtitleCount++;
         if (currentSubtitleCount == mpvSid) {
           final lang = stream['Language']?.toString() ?? 'unknown';
-          _log.fine(
-            'Reverse subtitle mapping: mpv sid=$mpvSid -> Jellyfin MediaStreams[$i] ($lang)',
+          _log.debug(
+            'Reverse subtitle mapping: mpv sid=$mpvSid ->'
+            ' Jellyfin MediaStreams[$i] ($lang)',
           );
           return i;
         }
       }
     }
 
-    _log.fine('Could not find subtitle #$mpvSid in MediaStreams');
+    _log.debug('Could not find subtitle #$mpvSid in MediaStreams');
     return null;
   }
 }

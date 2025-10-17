@@ -1,11 +1,12 @@
+// ignore_for_file: avoid_positional_boolean_parameters
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:logging/logging.dart';
+import 'package:jell_mpv_dart/src/config.dart';
 import 'package:path/path.dart' as p;
-
-import 'config.dart';
+import 'package:talker/talker.dart';
 
 /// Represents a property change event from mpv.
 class MpvPropertyChange {
@@ -20,7 +21,11 @@ class MpvController {
   MpvController(this.config);
 
   final JellyfinConfig config;
-  final _log = Logger('MpvController');
+  final _log = Talker(
+    logger: TalkerLogger(
+      settings: TalkerLoggerSettings(defaultTitle: 'MpvController'),
+    ),
+  );
   final _exitController = StreamController<int>.broadcast();
   final _propertyChangeController =
       StreamController<MpvPropertyChange>.broadcast();
@@ -66,22 +71,22 @@ class MpvController {
     process.stdout
         .transform(utf8.decoder)
         .transform(const LineSplitter())
-        .listen((line) => _log.fine('mpv stdout: $line'));
+        .listen((line) => _log.verbose('mpv stdout: $line'));
     process.stderr
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen((line) => _log.warning('mpv stderr: $line'));
 
     // Capture the process reference to avoid race condition with stop()
-    process.exitCode.then((code) {
+    await process.exitCode.then((code) async {
       _log.info('mpv process exited with code $code');
       _exitController.add(code);
       // Only cleanup if this is still the active process
       if (_process == process) {
-        _log.fine('Cleaning up after mpv exit');
-        _cleanup();
+        _log.debug('Cleaning up after mpv exit');
+        await _cleanup();
       } else {
-        _log.fine('Skipping cleanup - different process is now active');
+        _log.debug('Skipping cleanup - different process is now active');
       }
     });
 
@@ -104,10 +109,10 @@ class MpvController {
       await process.exitCode.timeout(const Duration(seconds: 2));
     } on TimeoutException {
       _log.warning('mpv quit timeout, sending SIGTERM');
-      process.kill(ProcessSignal.sigterm);
+      process.kill();
       await process.exitCode;
     } finally {
-      _cleanup();
+      await _cleanup();
     }
   }
 
@@ -272,7 +277,7 @@ class MpvController {
     final address = InternetAddress(socketPath, type: InternetAddressType.unix);
     final stopwatch = Stopwatch()..start();
     while (stopwatch.elapsed < const Duration(seconds: 5)) {
-      if (await File(socketPath).exists()) {
+      if (File(socketPath).existsSync()) {
         try {
           _ipcSocket = await Socket.connect(address, 0);
           break;
@@ -318,14 +323,14 @@ class MpvController {
           return;
         }
       }
-      _log.fine('mpv IPC: $decoded');
+      _log.debug('mpv IPC: $decoded');
     } catch (error, stackTrace) {
-      _log.severe('Failed to parse mpv IPC message: $line', error, stackTrace);
+      _log.warning('Failed to parse mpv IPC message: $line', error, stackTrace);
     }
   }
 
-  void _cleanup() {
-    _ipcSubscription?.cancel();
+  Future<void> _cleanup() async {
+    await _ipcSubscription?.cancel();
     _ipcSubscription = null;
     _ipcSocket?.destroy();
     _ipcSocket = null;

@@ -1,5 +1,10 @@
 import 'dart:convert';
 
+import 'package:freezed_annotation/freezed_annotation.dart';
+
+part 'models.freezed.dart';
+part 'models.g.dart';
+
 /// Utility to convert ticks (100ns units) into a [Duration].
 Duration? durationFromTicks(Object? value) {
   if (value == null) {
@@ -12,27 +17,41 @@ Duration? durationFromTicks(Object? value) {
   if (ticks == 0) {
     return Duration.zero;
   }
-  return Duration(microseconds: (ticks ~/ 10));
+  return Duration(microseconds: ticks ~/ 10);
 }
 
 int durationToTicks(Duration duration) => duration.inMicroseconds * 10;
 
-/// Message envelope emitted by the Jellyfin WebSocket.
-class JellyfinSocketMessage {
-  JellyfinSocketMessage({required this.type, required this.rawData});
+/// Converter for Duration to/from ticks for JSON serialization.
+class DurationTicksConverter implements JsonConverter<Duration, int> {
+  const DurationTicksConverter();
 
-  final String type;
-  final Object? rawData;
+  @override
+  Duration fromJson(int json) => Duration(microseconds: json ~/ 10);
+
+  @override
+  int toJson(Duration object) => object.inMicroseconds * 10;
+}
+
+/// Message envelope emitted by the Jellyfin WebSocket.
+@freezed
+class JellyfinSocketMessage with _$JellyfinSocketMessage {
+  const factory JellyfinSocketMessage({
+    required String type,
+    required Object? rawData,
+  }) = _JellyfinSocketMessage;
+
+  const JellyfinSocketMessage._();
 
   Map<String, dynamic>? tryDecodeData() {
     if (rawData == null) {
       return null;
     }
     if (rawData is Map<String, dynamic>) {
-      return rawData as Map<String, dynamic>;
+      return rawData! as Map<String, dynamic>;
     }
     if (rawData is String) {
-      final decoded = jsonDecode(rawData as String);
+      final decoded = jsonDecode(rawData! as String);
       if (decoded is Map<String, dynamic>) {
         return decoded;
       }
@@ -42,18 +61,21 @@ class JellyfinSocketMessage {
 }
 
 /// Jellyfin "Play" directive payload.
-class PlayRequest {
-  PlayRequest({
-    required this.itemIds,
-    required this.playCommand,
-    required this.playSessionId,
-    this.startIndex,
-    this.startPosition,
-    this.mediaSourceId,
-    this.audioStreamIndex,
-    this.subtitleStreamIndex,
-    this.controllingUserId,
-  });
+@freezed
+class PlayRequest with _$PlayRequest {
+  const factory PlayRequest({
+    required List<String> itemIds,
+    @Default('PlayNow') String playCommand,
+    String? playSessionId,
+    int? startIndex,
+    Duration? startPosition,
+    String? mediaSourceId,
+    int? audioStreamIndex,
+    int? subtitleStreamIndex,
+    String? controllingUserId,
+  }) = _PlayRequest;
+
+  const PlayRequest._();
 
   factory PlayRequest.fromJson(Map<String, dynamic> json) {
     final rawItems = json['ItemIds'];
@@ -65,13 +87,22 @@ class PlayRequest {
     } else if (rawItems != null) {
       ids.add(rawItems.toString());
     }
+
+    // Handle StartIndex with proper type checking
+    int? startIdx;
+    final startPlaylistIndex = json['StartPlaylistIndex'];
+    final startIndexValue = json['StartIndex'];
+    if (startPlaylistIndex is num) {
+      startIdx = startPlaylistIndex.toInt();
+    } else if (startIndexValue is num) {
+      startIdx = startIndexValue.toInt();
+    }
+
     return PlayRequest(
       itemIds: ids,
       playCommand: json['PlayCommand']?.toString() ?? 'PlayNow',
       playSessionId: json['PlaySessionId']?.toString(),
-      startIndex: (json['StartPlaylistIndex'] ?? json['StartIndex']) is num
-          ? (json['StartPlaylistIndex'] ?? json['StartIndex']).toInt()
-          : null,
+      startIndex: startIdx,
       startPosition: durationFromTicks(json['StartPositionTicks']),
       mediaSourceId: json['MediaSourceId']?.toString(),
       audioStreamIndex: json['AudioStreamIndex'] is num
@@ -83,16 +114,6 @@ class PlayRequest {
       controllingUserId: json['ControllingUserId']?.toString(),
     );
   }
-
-  final List<String> itemIds;
-  final String playCommand;
-  final String? playSessionId;
-  final int? startIndex;
-  final Duration? startPosition;
-  final String? mediaSourceId;
-  final int? audioStreamIndex;
-  final int? subtitleStreamIndex;
-  final String? controllingUserId;
 
   String chooseItemId() {
     if (itemIds.isEmpty) {
@@ -108,27 +129,26 @@ class PlayRequest {
 }
 
 /// Payload for POST /Sessions/Playing.
-class PlaybackStartRequest {
-  PlaybackStartRequest({
-    required this.itemId,
-    required this.mediaSourceId,
-    required this.playSessionId,
-    this.position = Duration.zero,
-    this.isPaused = false,
-    this.canSeek = true,
-    this.nowPlayingQueue,
-  });
+@freezed
+class PlaybackStartRequest with _$PlaybackStartRequest {
+  const factory PlaybackStartRequest({
+    required String itemId,
+    required String mediaSourceId,
+    required String playSessionId,
+    @Default(Duration.zero) Duration position,
+    @Default(false) bool isPaused,
+    @Default(true) bool canSeek,
+    List<QueueItem>? nowPlayingQueue,
+  }) = _PlaybackStartRequest;
 
-  final String itemId;
-  final String mediaSourceId;
-  final String playSessionId;
-  final Duration position;
-  final bool isPaused;
-  final bool canSeek;
-  final List<QueueItem>? nowPlayingQueue;
+  factory PlaybackStartRequest.fromJson(Map<String, dynamic> json) =>
+      _$PlaybackStartRequestFromJson(json);
+}
 
-  Map<String, dynamic> toJson() {
-    return {
+/// Extension to convert PlaybackStartRequest to Jellyfin API format
+extension PlaybackStartRequestJson on PlaybackStartRequest {
+  Map<String, dynamic> toJellyfinJson() {
+    return <String, dynamic>{
       'ItemId': itemId,
       'MediaSourceId': mediaSourceId,
       'PlaySessionId': playSessionId,
@@ -136,20 +156,29 @@ class PlaybackStartRequest {
       'CanSeek': canSeek,
       'PositionTicks': durationToTicks(position),
       if (nowPlayingQueue != null)
-        'NowPlayingQueue': nowPlayingQueue!.map((e) => e.toJson()).toList(),
+        'NowPlayingQueue': nowPlayingQueue!
+            .map((e) => e.toJellyfinJson())
+            .toList(),
     };
   }
 }
 
 /// Represents a queue item in the playlist.
-class QueueItem {
-  QueueItem({required this.id, this.playlistItemId});
+@freezed
+class QueueItem with _$QueueItem {
+  const factory QueueItem({
+    required String id,
+    String? playlistItemId,
+  }) = _QueueItem;
 
-  final String id;
-  final String? playlistItemId;
+  factory QueueItem.fromJson(Map<String, dynamic> json) =>
+      _$QueueItemFromJson(json);
+}
 
-  Map<String, dynamic> toJson() {
-    return {
+/// Extension to convert QueueItem to Jellyfin API format
+extension QueueItemJson on QueueItem {
+  Map<String, dynamic> toJellyfinJson() {
+    return <String, dynamic>{
       'Id': id,
       if (playlistItemId != null) 'PlaylistItemId': playlistItemId,
     };
@@ -157,33 +186,29 @@ class QueueItem {
 }
 
 /// Payload for POST /Sessions/Playing/Progress.
-class PlaybackProgressRequest {
-  PlaybackProgressRequest({
-    required this.itemId,
-    required this.mediaSourceId,
-    required this.playSessionId,
-    required this.position,
-    this.isPaused = false,
-    this.isMuted = false,
-    this.volumeLevel,
-    this.audioStreamIndex,
-    this.subtitleStreamIndex,
-    this.nowPlayingQueue,
-  });
+@freezed
+class PlaybackProgressRequest with _$PlaybackProgressRequest {
+  const factory PlaybackProgressRequest({
+    required String itemId,
+    required String mediaSourceId,
+    required String playSessionId,
+    required Duration position,
+    @Default(false) bool isPaused,
+    @Default(false) bool isMuted,
+    int? volumeLevel,
+    int? audioStreamIndex,
+    int? subtitleStreamIndex,
+    List<QueueItem>? nowPlayingQueue,
+  }) = _PlaybackProgressRequest;
 
-  final String itemId;
-  final String mediaSourceId;
-  final String playSessionId;
-  final Duration position;
-  final bool isPaused;
-  final bool isMuted;
-  final int? volumeLevel;
-  final int? audioStreamIndex;
-  final int? subtitleStreamIndex;
-  final List<QueueItem>? nowPlayingQueue;
+  factory PlaybackProgressRequest.fromJson(Map<String, dynamic> json) =>
+      _$PlaybackProgressRequestFromJson(json);
+}
 
-  Map<String, dynamic> toJson() {
-    return {
+/// Extension to convert PlaybackProgressRequest to Jellyfin API format
+extension PlaybackProgressRequestJson on PlaybackProgressRequest {
+  Map<String, dynamic> toJellyfinJson() {
+    return <String, dynamic>{
       'ItemId': itemId,
       'MediaSourceId': mediaSourceId,
       'PlaySessionId': playSessionId,
@@ -195,27 +220,31 @@ class PlaybackProgressRequest {
         'SubtitleStreamIndex': subtitleStreamIndex,
       'PositionTicks': durationToTicks(position),
       if (nowPlayingQueue != null)
-        'NowPlayingQueue': nowPlayingQueue!.map((e) => e.toJson()).toList(),
+        'NowPlayingQueue': nowPlayingQueue!
+            .map((e) => e.toJellyfinJson())
+            .toList(),
     };
   }
 }
 
 /// Payload for POST /Sessions/Playing/Stopped.
-class PlaybackStopRequest {
-  PlaybackStopRequest({
-    required this.itemId,
-    required this.mediaSourceId,
-    required this.playSessionId,
-    required this.position,
-  });
+@freezed
+class PlaybackStopRequest with _$PlaybackStopRequest {
+  const factory PlaybackStopRequest({
+    required String itemId,
+    required String mediaSourceId,
+    required String playSessionId,
+    required Duration position,
+  }) = _PlaybackStopRequest;
 
-  final String itemId;
-  final String mediaSourceId;
-  final String playSessionId;
-  final Duration position;
+  factory PlaybackStopRequest.fromJson(Map<String, dynamic> json) =>
+      _$PlaybackStopRequestFromJson(json);
+}
 
-  Map<String, dynamic> toJson() {
-    return {
+/// Extension to convert PlaybackStopRequest to Jellyfin API format
+extension PlaybackStopRequestJson on PlaybackStopRequest {
+  Map<String, dynamic> toJellyfinJson() {
+    return <String, dynamic>{
       'ItemId': itemId,
       'MediaSourceId': mediaSourceId,
       'PlaySessionId': playSessionId,

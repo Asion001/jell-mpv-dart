@@ -2,8 +2,9 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-import 'config.dart';
-import 'models.dart';
+import 'package:jell_mpv_dart/src/config.dart';
+import 'package:jell_mpv_dart/src/models.dart';
+import 'package:talker/talker.dart';
 
 /// Lightweight Jellyfin REST client focused on playback coordination.
 class JellyfinApi {
@@ -12,6 +13,11 @@ class JellyfinApi {
 
   final JellyfinConfig config;
   final http.Client client;
+  final Talker _log = Talker(
+    logger: TalkerLogger(
+      settings: TalkerLoggerSettings(defaultTitle: 'JellyfinApi'),
+    ),
+  );
   String? _sessionToken;
 
   /// Get authentication headers including session token if authenticated.
@@ -74,12 +80,11 @@ class JellyfinApi {
     final token = _sessionToken ?? config.accessToken;
     final query = <String, dynamic>{
       'api_key': token,
-      if (mediaSourceId != null) 'mediaSourceId': mediaSourceId,
+      'mediaSourceId': ?mediaSourceId,
       if (startPosition != null)
         'startTimeTicks': durationToTicks(startPosition),
-      if (audioStreamIndex != null) 'audioStreamIndex': audioStreamIndex,
-      if (subtitleStreamIndex != null)
-        'subtitleStreamIndex': subtitleStreamIndex,
+      'audioStreamIndex': ?audioStreamIndex,
+      'subtitleStreamIndex': ?subtitleStreamIndex,
     };
     return config.buildUri('Items/$itemId/Download', queryParameters: query);
   }
@@ -88,7 +93,7 @@ class JellyfinApi {
     final response = await client.post(
       config.buildUri('Sessions/Playing'),
       headers: {..._getHeaders(), 'Content-Type': 'application/json'},
-      body: jsonEncode(req.toJson()),
+      body: jsonEncode(req.toJellyfinJson()),
     );
     _ensureSuccess(response, 'POST Sessions/Playing');
   }
@@ -97,7 +102,7 @@ class JellyfinApi {
     final response = await client.post(
       config.buildUri('Sessions/Playing/Progress'),
       headers: {..._getHeaders(), 'Content-Type': 'application/json'},
-      body: jsonEncode(req.toJson()),
+      body: jsonEncode(req.toJellyfinJson()),
     );
     _ensureSuccess(response, 'POST Sessions/Playing/Progress');
   }
@@ -106,7 +111,7 @@ class JellyfinApi {
     final response = await client.post(
       config.buildUri('Sessions/Playing/Stopped'),
       headers: {..._getHeaders(), 'Content-Type': 'application/json'},
-      body: jsonEncode(req.toJson()),
+      body: jsonEncode(req.toJellyfinJson()),
     );
     _ensureSuccess(response, 'POST Sessions/Playing/Stopped');
   }
@@ -136,7 +141,7 @@ class JellyfinApi {
   Future<void> announceCapabilities() async {
     final capabilities = _getCapabilities();
     final body = jsonEncode(capabilities);
-    print('DEBUG: Announcing capabilities: $body');
+    _log.debug('Announcing capabilities: $body');
 
     final response = await client.post(
       config.buildUri('Sessions/Capabilities/Full'),
@@ -144,8 +149,10 @@ class JellyfinApi {
       body: body,
     );
 
-    print('DEBUG: Capabilities response: ${response.statusCode}');
-    print('DEBUG: Response body: ${response.body}');
+    _log.debug(
+      'Capabilities response: ${response.statusCode}'
+      'Response body: ${response.body}',
+    );
 
     _ensureSuccess(response, 'POST Sessions/Capabilities/Full');
   }

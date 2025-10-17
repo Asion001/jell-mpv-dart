@@ -4,6 +4,6 @@ export 'src/jellyfin_mpv_shim.dart';
 export 'src/models.dart'
     show
         PlayRequest,
-        PlaybackStartRequest,
         PlaybackProgressRequest,
+        PlaybackStartRequest,
         PlaybackStopRequest;

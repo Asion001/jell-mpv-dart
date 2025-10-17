@@ -1,4 +1,5 @@
 #!/usr/bin/env dart
+// ignore_for_file: avoid_print
 
 import 'dart:convert';
 import 'dart:io';
@@ -33,8 +34,9 @@ Future<void> main() async {
   final response = await client.get(sessionsUri, headers: api.authHeaders);
 
   if (response.statusCode != 200) {
-    stderr.writeln('Error: ${response.statusCode}');
-    stderr.writeln(response.body);
+    stderr
+      ..writeln('Error: ${response.statusCode}')
+      ..writeln(response.body);
     exit(1);
   }
 
@@ -46,9 +48,11 @@ Future<void> main() async {
 
     final deviceName = session['DeviceName'] ?? 'Unknown';
     final client = session['Client'] ?? 'Unknown';
-    final supportsRemoteControl = session['SupportsRemoteControl'] ?? false;
+    final supportsRemoteControl =
+        session['SupportsRemoteControl'] as bool? ?? false;
     final userId = session['UserId'] ?? 'N/A';
-    final playableMedia = session['PlayableMediaTypes'] ?? [];
+    final playableMedia =
+        session['PlayableMediaTypes'] as List<dynamic>? ?? <dynamic>[];
 
     print('📱 $deviceName');
     print('   Client: $client');

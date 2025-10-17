@@ -1,152 +1,52 @@
 import 'dart:io';
 
+import 'package:freezed_annotation/freezed_annotation.dart';
 import 'package:path/path.dart' as p;
 import 'package:yaml/yaml.dart';
 
+part 'config.freezed.dart';
+part 'config.g.dart';
+
 /// Strongly typed configuration for the Jellyfin → mpv shim.
-class JellyfinConfig {
-  JellyfinConfig({
-    required this.server,
-    required this.userId,
-    required this.deviceId,
-    required this.deviceName,
-    this.accessToken,
-    this.username,
-    this.password,
-    this.clientName = 'Jellyfin MPV Shim',
-    this.clientVersion = '0.1.0',
-    String? mpvExecutable,
-    List<String>? mpvArgs,
-    Duration? keepAliveInterval,
-    Duration? playbackProgressInterval,
-    this.startupReconnectBackoff = const Duration(seconds: 5),
-  }) : mpvExecutable = mpvExecutable ?? 'mpv',
-       mpvArgs = List.unmodifiable(mpvArgs ?? const <String>[]),
-       keepAliveInterval = keepAliveInterval ?? const Duration(seconds: 15),
-       playbackProgressInterval =
-           playbackProgressInterval ?? const Duration(seconds: 30) {
-    // Validate that either accessToken or (username + password) is provided
-    if (accessToken == null && (username == null || password == null)) {
-      throw ArgumentError(
-        'Either accessToken or both username and password must be provided',
-      );
-    }
-  }
+@freezed
+class JellyfinConfig with _$JellyfinConfig {
+  const factory JellyfinConfig({
+    @JsonKey(fromJson: JellyfinConfig.parseServer) required Uri server,
+    required String userId,
+    required String deviceId,
+    required String deviceName,
+    String? accessToken,
+    String? username,
+    String? password,
+    @Default('Jellyfin MPV Shim') String clientName,
+    @Default('0.1.0') String clientVersion,
+    @Default('mpv') String mpvExecutable,
+    @JsonKey(fromJson: JellyfinConfig.parseStringList)
+    @Default(<String>[])
+    List<String> mpvArgs,
+    @JsonKey(fromJson: JellyfinConfig.parseDuration)
+    @Default(Duration(seconds: 15))
+    Duration keepAliveInterval,
+    @JsonKey(fromJson: JellyfinConfig.parseDuration)
+    @Default(Duration(seconds: 30))
+    Duration playbackProgressInterval,
+    @JsonKey(fromJson: JellyfinConfig.parseDuration)
+    @Default(Duration(seconds: 5))
+    Duration startupReconnectBackoff,
+  }) = _JellyfinConfig;
 
-  /// Base Jellyfin server URI (http or https).
-  final Uri server;
+  const JellyfinConfig._();
 
-  /// Jellyfin UserId that owns the session.
-  final String userId;
-
-  /// Unique identifier for this device as seen by Jellyfin.
-  final String deviceId;
-
-  /// Human friendly name for the device.
-  final String deviceName;
-
-  /// Access token with play permissions (if using token auth).
-  final String? accessToken;
-
-  /// Username for password authentication (alternative to accessToken).
-  final String? username;
-
-  /// Password for password authentication (alternative to accessToken).
-  final String? password;
-
-  /// Client name included in Jellyfin auth headers.
-  final String clientName;
-
-  /// Client version included in Jellyfin auth headers.
-  final String clientVersion;
-
-  /// mpv executable path/binary name.
-  final String mpvExecutable;
-
-  /// Extra mpv arguments defined by the user.
-  final List<String> mpvArgs;
-
-  /// Interval for WebSocket keep-alives.
-  final Duration keepAliveInterval;
-
-  /// Interval to report playback progress to Jellyfin.
-  final Duration playbackProgressInterval;
-
-  /// Base reconnect backoff for startup connection loops.
-  final Duration startupReconnectBackoff;
-
-  static JellyfinConfig fromMap(Map<String, dynamic> map) {
-    final server = _parseServer(map['server']);
-    return JellyfinConfig(
-      server: server,
-      userId: _requireString(map, 'userId'),
-      deviceId: _requireString(map, 'deviceId'),
-      deviceName: _requireString(map, 'deviceName'),
-      accessToken: map['accessToken']?.toString(),
-      username: map['username']?.toString(),
-      password: map['password']?.toString(),
-      clientName: map['clientName']?.toString() ?? 'Jellyfin MPV Shim',
-      clientVersion: map['clientVersion']?.toString() ?? '0.1.0',
-      mpvExecutable: map['mpvExecutable']?.toString(),
-      mpvArgs: _parseStringList(map['mpvArgs']),
-      keepAliveInterval: _parseDuration(
-        map['keepAliveInterval'],
-        defaultSeconds: 15,
-      ),
-      playbackProgressInterval: _parseDuration(
-        map['playbackProgressInterval'],
-        defaultSeconds: 30,
-      ),
-      startupReconnectBackoff: _parseDuration(
-        map['startupReconnectBackoff'],
-        defaultSeconds: 5,
-      ),
-    );
-  }
+  factory JellyfinConfig.fromJson(Map<String, dynamic> json) =>
+      _$JellyfinConfigFromJson(json);
 
   static Future<JellyfinConfig> fromYamlFile(File file) async {
     final contents = await file.readAsString();
     final yaml = loadYaml(contents);
     if (yaml is! YamlMap) {
-      throw FormatException('Invalid YAML configuration.');
+      throw const FormatException('Invalid YAML configuration.');
     }
-    return fromMap(_yamlToMap(yaml));
-  }
-
-  JellyfinConfig copyWith({
-    Uri? server,
-    String? userId,
-    String? deviceId,
-    String? deviceName,
-    String? accessToken,
-    String? username,
-    String? password,
-    String? clientName,
-    String? clientVersion,
-    String? mpvExecutable,
-    List<String>? mpvArgs,
-    Duration? keepAliveInterval,
-    Duration? playbackProgressInterval,
-    Duration? startupReconnectBackoff,
-  }) {
-    return JellyfinConfig(
-      server: server ?? this.server,
-      userId: userId ?? this.userId,
-      deviceId: deviceId ?? this.deviceId,
-      deviceName: deviceName ?? this.deviceName,
-      accessToken: accessToken ?? this.accessToken,
-      username: username ?? this.username,
-      password: password ?? this.password,
-      clientName: clientName ?? this.clientName,
-      clientVersion: clientVersion ?? this.clientVersion,
-      mpvExecutable: mpvExecutable ?? this.mpvExecutable,
-      mpvArgs: mpvArgs ?? this.mpvArgs,
-      keepAliveInterval: keepAliveInterval ?? this.keepAliveInterval,
-      playbackProgressInterval:
-          playbackProgressInterval ?? this.playbackProgressInterval,
-      startupReconnectBackoff:
-          startupReconnectBackoff ?? this.startupReconnectBackoff,
-    );
+    return JellyfinConfig.fromJson(_yamlToMap(yaml));
   }
 
   Map<String, String> get authHeaders {
@@ -155,7 +55,11 @@ class JellyfinConfig {
       headers['X-Emby-Token'] = accessToken!;
     }
     headers['X-Emby-Authorization'] =
-        'MediaBrowser Client="$clientName", Device="$deviceName", DeviceId="$deviceId", Version="$clientVersion", UserId="$userId"';
+        'MediaBrowser Client="$clientName", '
+        'Device="$deviceName", '
+        'DeviceId="$deviceId", '
+        'Version="$clientVersion", '
+        'UserId="$userId"';
     return headers;
   }
 
@@ -193,7 +97,7 @@ class JellyfinConfig {
     );
   }
 
-  static Uri _parseServer(Object? value) {
+  static Uri parseServer(Object? value) {
     if (value == null) {
       throw ArgumentError('Configuration is missing "server".');
     }
@@ -204,15 +108,7 @@ class JellyfinConfig {
     return uri;
   }
 
-  static String _requireString(Map<String, dynamic> map, String key) {
-    final value = map[key];
-    if (value == null || value.toString().isEmpty) {
-      throw ArgumentError('Configuration is missing "$key".');
-    }
-    return value.toString();
-  }
-
-  static List<String> _parseStringList(Object? value) {
+  static List<String> parseStringList(Object? value) {
     if (value == null) {
       return const <String>[];
     }
@@ -222,9 +118,9 @@ class JellyfinConfig {
     return value.toString().split(',');
   }
 
-  static Duration _parseDuration(Object? value, {required int defaultSeconds}) {
+  static Duration parseDuration(Object? value) {
     if (value == null) {
-      return Duration(seconds: defaultSeconds);
+      throw ArgumentError('Duration value cannot be null.');
     }
     if (value is int) {
       return Duration(seconds: value);
