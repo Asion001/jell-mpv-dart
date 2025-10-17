@@ -1,7 +1,7 @@
-name: jell_dart_mpv
+name: jell_mpv_dart
 description: Jellyfin playback shim that relays Jellyfin sessions to an mpv player.
 version: 0.1.0
-repository: https://github.com/example/jell_dart_mpv
+repository: https://github.com/example/jell-mpv-dart
 
 environment:
   sdk: ^3.9.2

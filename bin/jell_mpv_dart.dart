@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:args/args.dart';
 import 'package:logging/logging.dart';
 
-import 'package:jell_dart_mpv/jell_dart_mpv.dart';
+import 'package:jell_mpv_dart/jell_mpv_dart.dart';
 
 const _cliVersion = '0.1.0';
 
@@ -101,7 +101,7 @@ Future<void> main(List<String> arguments) async {
     return;
   }
   if (_getFlag(argResults, 'version')) {
-    stdout.writeln('jell_dart_mpv $_cliVersion');
+    stdout.writeln('jell_mpv_dart $_cliVersion');
     return;
   }
 
@@ -129,7 +129,7 @@ Future<void> main(List<String> arguments) async {
 }
 
 void _printUsage(ArgParser parser) {
-  stdout.writeln('Usage: jell_dart_mpv [options]\n');
+  stdout.writeln('Usage: jell_mpv_dart [options]\n');
   stdout.writeln(parser.usage);
 }
 
@@ -284,7 +284,7 @@ String _defaultDeviceId() {
   if (hostname.isNotEmpty) {
     return hostname.replaceAll(RegExp('[^a-zA-Z0-9_-]'), '_');
   }
-  return 'jell_dart_mpv_cli';
+  return 'jell_mpv_dart_cli';
 }
 
 String _defaultDeviceName() {

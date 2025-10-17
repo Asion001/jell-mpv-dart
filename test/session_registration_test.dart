@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
-import 'package:jell_dart_mpv/jell_dart_mpv.dart';
+import 'package:jell_mpv_dart/jell_mpv_dart.dart';
 import 'package:logging/logging.dart';
 import 'package:test/test.dart';
 

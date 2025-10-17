@@ -46,7 +46,7 @@ A Jellyfin playback client written in Dart that relays media playback commands f
 1. Install dependencies: `dart pub get`
 2. Copy `config.example.yaml` to `config.yaml`
 3. Fill in your Jellyfin credentials
-4. Run: `dart run bin/jell_dart_mpv.dart --config config.yaml`
+4. Run: `dart run bin/jell_mpv_dart.dart --config config.yaml`
 
 ## Configuration
 

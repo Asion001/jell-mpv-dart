@@ -4,8 +4,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
-import 'package:jell_dart_mpv/jell_dart_mpv.dart';
-import 'package:jell_dart_mpv/src/models.dart';
+import 'package:jell_mpv_dart/jell_mpv_dart.dart';
+import 'package:jell_mpv_dart/src/models.dart';
 
 /// Test script to send remote control commands to the mpv player
 Future<void> main(List<String> args) async {

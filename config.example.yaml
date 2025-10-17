@@ -30,7 +30,7 @@ deviceId: my_mpv_player
 deviceName: My MPV Player
 
 # Client identification (optional)
-clientName: jell_dart_mpv
+clientName: jell_mpv_dart
 clientVersion: 0.1.0
 
 # mpv configuration (optional)
